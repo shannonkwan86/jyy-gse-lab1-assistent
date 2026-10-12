@@ -1,0 +1,16 @@
+{
+  "articles_dir": "/absolute/path/to/shannon-blog/src/content/posts",
+  "index_db": "../data/index.sqlite",
+  "chat": {
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "api_key_env": "DEEPSEEK_API_KEY"
+  },
+  "embedding": {
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "text-embedding-v4",
+    "api_key_env": "DASHSCOPE_API_KEY"
+  },
+  "max_steps": 8,
+  "timeout_seconds": 180
+}

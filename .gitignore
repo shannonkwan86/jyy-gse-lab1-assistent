@@ -1,0 +1,14 @@
+# Private runtime data and credentials
+/data/
+.env
+.env.*
+!.env.example
+/configs/*.local.*
+
+# Build and local artifacts
+/assistant
+/bin/
+/dist/
+*.test
+coverage.out
+.DS_Store
