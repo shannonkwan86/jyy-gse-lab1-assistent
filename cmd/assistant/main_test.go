@@ -91,7 +91,7 @@ func (f *modelFixture) action(messages []string) string {
 		return "{}"
 	}
 	id := strings.Split(last[pos+6:], `"`)[0]
-	return fmt.Sprintf(`{"action":"final","answer":"这篇记录矩阵转置 [%s]","citations":[%q]}`, id, id)
+	return fmt.Sprintf(`{"action":"final","sections":[{"text":"这篇记录矩阵转置","citations":[%q]}]}`, id)
 }
 
 func writeCLIFile(t *testing.T, path, text string) {

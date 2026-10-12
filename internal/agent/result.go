@@ -3,26 +3,22 @@ package agent
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"assistant/internal/knowledge"
 )
 
-// Standalone identifier markers are reserved for [chunkID] citations.
-var citationMarker = regexp.MustCompile(`\[([A-Za-z0-9_-]+)\]`)
-var markdownCode = regexp.MustCompile("(?s)```.*?```|~~~.*?~~~|`[^`]*`")
-
 func (a *Agent) finish(ctx context.Context, act action, state *queryState) (Result, error) {
 	result := Result{Trace: state.trace}
-	if !state.searched || strings.TrimSpace(act.Answer) == "" {
+	sections := act.Sections
+	if len(sections) == 0 && strings.TrimSpace(act.Answer) != "" {
+		sections = []Section{{Text: act.Answer, Citations: act.Citations}}
+	}
+	if !state.searched || len(sections) == 0 || !hasSectionText(sections) {
 		return result, fmt.Errorf("final requires search and a nonempty answer")
 	}
-	if !act.Insufficient && len(act.Citations) == 0 {
+	if !act.Insufficient && !hasCitations(sections) {
 		return result, fmt.Errorf("supported answer requires citations")
-	}
-	if err := validateCitationMarkers(act.Answer, act.Citations); err != nil {
-		return result, err
 	}
 	for _, c := range state.seen {
 		if err := ctx.Err(); err != nil {
@@ -32,42 +28,43 @@ func (a *Agent) finish(ctx context.Context, act action, state *queryState) (Resu
 			return result, err
 		}
 	}
-	sources, err := citedSources(act.Citations, state.seen)
+	ids := sectionCitations(sections)
+	sources, err := citedSources(ids, state.seen)
 	if err != nil {
 		return result, err
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	result.Answer, result.Sources = act.Answer, sources
+	result.Answer, result.Sections, result.Sources = joinSections(sections), sections, sources
 	return result, nil
 }
 
-func validateCitationMarkers(answer string, citations []string) error {
-	// Brackets in code examples are data, not citation markers.
-	answer = markdownCode.ReplaceAllString(answer, "")
-	listed := make(map[string]bool, len(citations))
-	for _, id := range citations {
-		listed[id] = true
-	}
-	marked := map[string]bool{}
-	for _, match := range citationMarker.FindAllStringSubmatchIndex(answer, -1) {
-		// Markdown links are prose, not standalone citation markers.
-		if match[1] < len(answer) && answer[match[1]] == '(' {
-			continue
-		}
-		id := answer[match[2]:match[3]]
-		if !listed[id] {
-			return fmt.Errorf("answer citation is not listed: %s", id)
-		}
-		marked[id] = true
-	}
-	for id := range listed {
-		if !marked[id] {
-			return fmt.Errorf("listed citation is missing from answer: %s", id)
+func hasSectionText(sections []Section) bool {
+	for _, section := range sections {
+		if strings.TrimSpace(section.Text) != "" {
+			return true
 		}
 	}
-	return nil
+	return false
+}
+
+func hasCitations(sections []Section) bool { return len(sectionCitations(sections)) > 0 }
+
+func sectionCitations(sections []Section) []string {
+	var ids []string
+	for _, section := range sections {
+		ids = append(ids, section.Citations...)
+	}
+	return ids
+}
+
+func joinSections(sections []Section) string {
+	texts := make([]string, len(sections))
+	for i, section := range sections {
+		texts[i] = section.Text
+	}
+	return strings.Join(texts, "\n\n")
 }
 
 func citedSources(ids []string, seen map[string]knowledge.Chunk) ([]knowledge.Chunk, error) {
