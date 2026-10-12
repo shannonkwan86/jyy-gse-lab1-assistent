@@ -13,63 +13,16 @@ import (
 	"testing"
 )
 
-// This exercises the real CLI, HTTP clients, SQLite synchronization and agent;
-// only external model responses are provided by the local HTTP fixture.
+// Real CLI, HTTP clients, SQLite and agent; only model responses are simulated.
 func TestCLIEndToEndAndFollowup(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "cache.md"), []byte("---\ntitle: Cache Lab\n---\n矩阵转置减少缓存未命中。"), 0600)
-	steps := 0
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var p map[string]json.RawMessage
-		json.NewDecoder(r.Body).Decode(&p)
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/embeddings" {
-			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"index": 0, "embedding": []float64{1, 0}}}, "usage": map[string]int{"prompt_tokens": 4}})
-			return
-		}
-		if r.URL.Path != "/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		steps++
-		var msgs []struct{ Role, Content string }
-		json.Unmarshal(p["messages"], &msgs)
-		action := ""
-		phase := (steps - 1) % 3
-		if phase == 0 {
-			if steps == 4 {
-				found := false
-				for _, m := range msgs {
-					if strings.Contains(m.Content, "这篇记录矩阵转置") {
-						found = true
-					}
-				}
-				if !found {
-					t.Error("followup lost conversational context")
-				}
-			}
-			action = `{"action":"search","query":"矩阵转置"}`
-		} else {
-			last := msgs[len(msgs)-1].Content
-			pos := strings.Index(last, `"id":"`)
-			if pos < 0 {
-				t.Error("no candidate/evidence ID")
-				http.Error(w, "invalid", 500)
-				return
-			}
-			id := strings.Split(last[pos+6:], `"`)[0]
-			if phase == 1 {
-				action = fmt.Sprintf(`{"action":"read","ids":[%q]}`, id)
-			} else {
-				action = fmt.Sprintf(`{"action":"final","answer":"这篇记录矩阵转置 [%s]","citations":[%q]}`, id, id)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"role": "assistant", "content": action}}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5}})
-	}))
+	writeCLIFile(t, filepath.Join(root, "cache.md"), "---\ntitle: Cache Lab\n---\n矩阵转置减少缓存未命中。")
+	fixture := &modelFixture{t: t}
+	s := httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
 	defer s.Close()
 	config := filepath.Join(t.TempDir(), "config.json")
 	data := fmt.Sprintf(`{"articles_dir":%q,"index_db":%q,"chat":{"base_url":%q,"model":"chat","api_key":"test"},"embedding":{"base_url":%q,"model":"embed","api_key":"test"}}`, root, filepath.Join(t.TempDir(), "i.db"), s.URL, s.URL)
-	os.WriteFile(config, []byte(data), 0600)
+	writeCLIFile(t, config, data)
 	var out, log bytes.Buffer
 	err := run(context.Background(), []string{"-config", config}, strings.NewReader("找缓存文章\n展开看看\n/exit\n"), &out, &log)
 	if err != nil {
@@ -82,9 +35,75 @@ func TestCLIEndToEndAndFollowup(t *testing.T) {
 		t.Fatalf("cache not reused: %s", log.String())
 	}
 }
+
+type modelFixture struct {
+	t     *testing.T
+	steps int
+}
+
+func (f *modelFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Messages []struct{ Role, Content string } `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		f.t.Error(err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	var response any
+	switch r.URL.Path {
+	case "/embeddings":
+		response = map[string]any{"data": []any{map[string]any{"index": 0, "embedding": []float64{1, 0}}}, "usage": map[string]int{"prompt_tokens": 4}}
+	case "/chat/completions":
+		f.steps++
+		var messages []string
+		for _, m := range payload.Messages {
+			messages = append(messages, m.Content)
+		}
+		action := f.action(messages)
+		response = map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"role": "assistant", "content": action}}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5}}
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		f.t.Error(err)
+	}
+}
+
+func (f *modelFixture) action(messages []string) string {
+	phase := (f.steps - 1) % 2
+	if phase == 0 {
+		if f.steps == 3 && !strings.Contains(strings.Join(messages, "\n"), "这篇记录矩阵转置") {
+			f.t.Error("followup lost conversational context")
+		}
+		return `{"action":"search","query":"矩阵转置"}`
+	}
+	if len(messages) == 0 {
+		f.t.Error("no messages")
+		return "{}"
+	}
+	last := messages[len(messages)-1]
+	pos := strings.Index(last, `"id":"`)
+	if pos < 0 {
+		f.t.Error("no candidate/evidence ID")
+		return "{}"
+	}
+	id := strings.Split(last[pos+6:], `"`)[0]
+	return fmt.Sprintf(`{"action":"final","answer":"这篇记录矩阵转置 [%s]","citations":[%q]}`, id, id)
+}
+
+func writeCLIFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCLIOfflineScanWithoutCredentials(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "a.md"), []byte("# test"), 0600)
+	writeCLIFile(t, filepath.Join(root, "a.md"), "# test")
 	var out, log bytes.Buffer
 	if err := run(context.Background(), []string{"-scan", root}, strings.NewReader(""), &out, &log); err != nil {
 		t.Fatal(err)
