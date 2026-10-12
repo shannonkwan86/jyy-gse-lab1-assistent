@@ -17,6 +17,7 @@ type options struct {
 	query      string
 	jsonOutput bool
 	scan       string
+	debugDir   string
 }
 
 func parseOptions(args []string, log io.Writer) (options, error) {
@@ -27,6 +28,7 @@ func parseOptions(args []string, log io.Writer) (options, error) {
 	flags.StringVar(&opts.query, "query", "", "run one query and exit")
 	flags.BoolVar(&opts.jsonOutput, "json", false, "JSON result for one query")
 	flags.StringVar(&opts.scan, "scan", "", "offline scan of a Markdown article directory; no API calls")
+	flags.StringVar(&opts.debugDir, "debug-dir", "", "save failed action responses privately in this directory")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}
@@ -52,6 +54,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, log io.Writer) e
 		return err
 	}
 	defer app.index.Close()
+	app.enableDiagnostics(opts.debugDir)
 	if opts.query != "" {
 		return app.query(ctx, opts.query, opts.jsonOutput, out)
 	}

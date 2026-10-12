@@ -21,11 +21,12 @@ type Result struct {
 	Trace    []string          `json:"trace"`
 }
 type Agent struct {
-	chat    Chat
-	index   *knowledge.Index
-	budget  int
-	history []llm.Message
-	trace   func(string)
+	chat         Chat
+	index        *knowledge.Index
+	budget       int
+	history      []llm.Message
+	trace        func(string)
+	parseFailure func(string, string)
 }
 
 func New(c Chat, k *knowledge.Index, budget int, trace func(string)) *Agent {
@@ -82,4 +83,10 @@ func (a *Agent) remember(q, answer string) {
 	if len(a.history) > 6 {
 		a.history = a.history[len(a.history)-6:]
 	}
+}
+
+// SetParseFailureHandler enables opt-in diagnostics for malformed action responses.
+// The callback receives private model output and must not log it by default.
+func (a *Agent) SetParseFailureHandler(handler func(string, string)) {
+	a.parseFailure = handler
 }

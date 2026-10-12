@@ -41,7 +41,11 @@ func (a *Agent) nextAction(ctx context.Context, messages []llm.Message) (action,
 		return act, "", err
 	}
 	if err := json.Unmarshal([]byte(raw), &act); err != nil {
-		return act, "", fmt.Errorf("invalid agent JSON action")
+		reason := parseFailureReason(err)
+		if a.parseFailure != nil {
+			a.parseFailure(raw, reason)
+		}
+		return act, "", fmt.Errorf("invalid agent JSON action: %s", reason)
 	}
 	return act, raw, nil
 }
@@ -82,4 +86,16 @@ func (a *Agent) search(ctx context.Context, query string, state *queryState) (an
 		state.seen[hit.ID] = hit.Chunk
 	}
 	return map[string]any{"results": hits}, nil
+}
+
+// Describe location and category without embedding model-controlled text.
+func parseFailureReason(err error) string {
+	switch failure := err.(type) {
+	case *json.SyntaxError:
+		return fmt.Sprintf("JSON syntax error at byte %d", failure.Offset)
+	case *json.UnmarshalTypeError:
+		return fmt.Sprintf("JSON type mismatch at byte %d (expected %s)", failure.Offset, failure.Type)
+	default:
+		return "JSON decoding failed"
+	}
 }
