@@ -12,11 +12,17 @@ import (
 )
 
 type action struct {
-	Action       string   `json:"action"`
-	Query        string   `json:"query"`
-	Answer       string   `json:"answer"`
-	Citations    []string `json:"citations"`
-	Insufficient bool     `json:"insufficient"`
+	Action       string    `json:"action"`
+	Query        string    `json:"query"`
+	Answer       string    `json:"answer"`
+	Citations    []string  `json:"citations"`
+	Insufficient bool      `json:"insufficient"`
+	Sections     []Section `json:"sections"`
+}
+
+type Section struct {
+	Text      string   `json:"text"`
+	Citations []string `json:"citations"`
 }
 
 type queryState struct {

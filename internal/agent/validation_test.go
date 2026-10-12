@@ -35,30 +35,20 @@ func finalAgent(t *testing.T, k *knowledge.Index, final func() map[string]any) *
 	}), k, 8, nil)
 }
 
-func TestAgentChecksAnswerCitationMarkers(t *testing.T) {
-	for _, mode := range []string{"invented", "missing", "unlisted", "insufficient"} {
+func TestAgentChecksStructuredCitations(t *testing.T) {
+	for _, mode := range []string{"invented", "unlisted"} {
 		t.Run(mode, func(t *testing.T) {
 			k := index(t)
-			hits, err := k.Search(context.Background(), "缓存", 1)
-			if err != nil || len(hits) != 1 {
-				t.Fatalf("search: %v %v", hits, err)
-			}
-			id := hits[0].ID
+			id := searchTestHits(t, k)[0].ID
 			a := finalAgent(t, k, func() map[string]any {
-				answer, citations := "缓存 [invented]", []string{id}
-				if mode == "missing" {
-					answer = "缓存实验"
+				citations := []string{id}
+				if mode == "unlisted" || mode == "invented" {
+					citations = []string{strings.Repeat("f", 64)}
 				}
-				if mode == "unlisted" {
-					answer = "缓存 [" + id + "] [" + strings.Repeat("f", 64) + "]"
-				}
-				if mode == "insufficient" {
-					answer, citations = "资料不足 ["+id+"]", nil
-				}
-				return map[string]any{"action": "final", "answer": answer, "citations": citations, "insufficient": mode == "insufficient"}
+				return map[string]any{"action": "final", "sections": []map[string]any{{"text": "[CSAPP] 缓存实验", "citations": citations}}}
 			})
 			if _, err := a.Query(context.Background(), "缓存"); err == nil {
-				t.Fatal("inconsistent answer citations accepted")
+				t.Fatal("invalid structured citation accepted")
 			}
 		})
 	}
@@ -149,6 +139,24 @@ func TestCitationChecksAllowMarkdownLinksAndCode(t *testing.T) {
 	})
 	if _, err := a.Query(context.Background(), "缓存"); err != nil {
 		t.Fatalf("ordinary Markdown was treated as a citation: %v", err)
+	}
+}
+
+func TestStructuredSectionsAllowBracketedArticleTitles(t *testing.T) {
+	k := index(t)
+	id := searchTestHits(t, k)[0].ID
+	a := finalAgent(t, k, func() map[string]any {
+		return map[string]any{
+			"action": "final",
+			"sections": []map[string]any{{
+				"text":      "[CSAPP] Cache Lab 的测试记录。",
+				"citations": []string{id},
+			}},
+		}
+	})
+	r, err := a.Query(context.Background(), "缓存")
+	if err != nil || r.Answer != "[CSAPP] Cache Lab 的测试记录。" || len(r.Sections) != 1 || len(r.Sources) != 1 {
+		t.Fatalf("structured citation result: %+v %v", r, err)
 	}
 }
 

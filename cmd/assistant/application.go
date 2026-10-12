@@ -64,8 +64,29 @@ func (a *application) reportUsage(started time.Time) {
 }
 
 func writeResult(out io.Writer, result agent.Result) error {
-	if _, err := fmt.Fprintln(out, result.Answer); err != nil {
-		return err
+	refs := make(map[string]int, len(result.Sources))
+	for i, source := range result.Sources {
+		refs[source.ID] = i + 1
+	}
+	for _, section := range result.Sections {
+		if _, err := fmt.Fprint(out, section.Text); err != nil {
+			return err
+		}
+		for _, id := range section.Citations {
+			if n, ok := refs[id]; ok {
+				if _, err := fmt.Fprintf(out, " [%d]", n); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := fmt.Fprint(out, "\n\n"); err != nil {
+			return err
+		}
+	}
+	if len(result.Sections) == 0 {
+		if _, err := fmt.Fprintln(out, result.Answer); err != nil {
+			return err
+		}
 	}
 	for i, s := range result.Sources {
 		_, err := fmt.Fprintf(out, "\n[%d] %s · %s\n%s:%d-%d\nID: %s · version: %s\n%s\n",
